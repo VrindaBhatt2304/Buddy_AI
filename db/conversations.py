@@ -1,0 +1,75 @@
+from pymongo import DESCENDING
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+import uuid
+from db.mongo import get_collections
+
+conversations = get_collections("conversations")
+conversations.create_index([("last_interacted", DESCENDING)])
+
+
+def now_utc():
+    return datetime.now(timezone.utc)
+
+def create_new_conversation_id() -> str:
+    return str(uuid.uuid4())
+
+def create_new_conversations(title: Optional[str] = None, role: Optional[str] = None, content: Optional[str] = None) -> str:
+    conv_id = create_new_conversation_id()
+    ts = now_utc()
+    doc = {
+        "id": conv_id,
+        "title": title or "Untitled Conversation",
+        "messages": [],
+        "last_interacted": ts,
+    }
+    if role and content:
+        doc["messages"].append({"role": role, "content": content, "ts": ts})
+    conversations.insert_one(doc)
+    return conv_id
+
+def add_messages(conv_id: str, role: str, content: str) -> bool:
+    ts = now_utc()
+    res = conversations.update_one(
+        {"_id": conv_id},
+        {
+            "$push": {"messages": {"role": role, "content": content, "ts": ts}},
+            "$set": {"last_interacted": ts},
+        },
+    )
+    return res.matched_count == 1
+
+def get_conversation(conv_id : str) ->  Optional[Dict[str, Any]]:
+    ts = now_utc()
+    doc = conversations.find_one_and_update(
+        {"_id": conv_id},
+        {"$set": {"last_interacted": ts}},
+
+        return_document=True
+    )
+    return doc
+
+
+def get_all_conversations() -> Dict[str, str]:
+    cursor = conversations.find({}, {"title": 1}).sort("last_interacted", DESCENDING)
+    return {doc["_id"]: doc["title"] for doc in cursor}
+
+
+# Example usage
+# For a new conversation (with the first message):
+#conv_id = create_new_conversations(title= "Intro to Deep Learning", role= "User", content= "What is DL?")
+#add_messages(conv_id, "assistant", "Answer for DL query")
+#print(get_conversation(conv_id))
+#print(get_all_conversations())
+
+# For an existing conversation
+#add_messages(conv_id, "User", "What is ML?")
+#add_messages(conv_id, "assistant", "Answer for ML query")
+#print(get_conversation(conv_id))
+#print(get_all_conversations)
+
+# For a new conversation (with diff title and first message):
+#conv_id2 = create_new_conversations(title="Intro to Generative AI", role="User", content="What is Generative AI?")
+#add_messages(conv_id2, "assistant", "Answer fro Generative AI query")
+#print(get_conversation(conv_id2))
+#print(get_all_conversations)
